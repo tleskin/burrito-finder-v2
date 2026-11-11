@@ -1,54 +1,119 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connection } from "next/server";
-import { BurritoSearchResponse, BurritoSpot, mockSpots } from "@/lib/burritos";
+import {
+  BurritoSearchResponse,
+  BurritoSpot,
+  haversineMiles,
+  mockSpots,
+} from "@/lib/burritos";
 
-const YELP_SEARCH_URL = "https://api.yelp.com/v3/businesses/search";
+const PLACES_SEARCH_URL =
+  "https://places.googleapis.com/v1/places:searchText";
 
-interface YelpBusiness {
+// Only request the fields the UI shows. Rating, review count, and price
+// are Enterprise-tier fields ($35/1k calls, 1,000 free/month); everything
+// else here is Pro ($32/1k, 5,000 free/month). The call bills at the
+// highest tier present, so each search is one Enterprise call.
+const FIELD_MASK = [
+  "places.id",
+  "places.displayName",
+  "places.formattedAddress",
+  "places.addressComponents",
+  "places.location",
+  "places.rating",
+  "places.userRatingCount",
+  "places.priceLevel",
+  "places.googleMapsUri",
+].join(",");
+
+interface GoogleAddressComponent {
+  longText?: string;
+  shortText?: string;
+  types?: string[];
+}
+
+interface GooglePlace {
   id?: string;
-  name?: string;
+  displayName?: { text?: string; languageCode?: string };
+  formattedAddress?: string;
+  addressComponents?: GoogleAddressComponent[];
+  location?: { latitude?: number; longitude?: number };
   rating?: number;
-  review_count?: number;
-  price?: string;
-  distance?: number;
-  url?: string;
-  image_url?: string;
-  location?: {
-    address1?: string;
-    city?: string;
-    state?: string;
-    zip_code?: string;
-  };
-  coordinates?: {
-    latitude?: number;
-    longitude?: number;
-  };
+  userRatingCount?: number;
+  priceLevel?: string;
+  googleMapsUri?: string;
 }
 
-function metersToMiles(meters: number | undefined): number | undefined {
-  if (typeof meters !== "number" || Number.isNaN(meters)) return undefined;
-  return Math.round((meters / 1609.344) * 10) / 10;
+function mapPriceLevel(level: string | undefined): string | undefined {
+  switch (level) {
+    case "PRICE_LEVEL_INEXPENSIVE":
+      return "$";
+    case "PRICE_LEVEL_MODERATE":
+      return "$$";
+    case "PRICE_LEVEL_EXPENSIVE":
+      return "$$$";
+    case "PRICE_LEVEL_VERY_EXPENSIVE":
+      return "$$$$";
+    default:
+      return undefined;
+  }
 }
 
-function normalizeBusiness(b: YelpBusiness): BurritoSpot | null {
-  const lat = b.coordinates?.latitude;
-  const lon = b.coordinates?.longitude;
+function componentText(
+  components: GoogleAddressComponent[] | undefined,
+  type: string,
+  preferShort = false
+): string {
+  const found = components?.find((c) => c.types?.includes(type));
+  if (!found) return "";
+  return (
+    (preferShort ? found.shortText : found.longText) ??
+    found.shortText ??
+    found.longText ??
+    ""
+  );
+}
+
+function normalizePlace(
+  p: GooglePlace,
+  center: { lat: number; lon: number } | null
+): BurritoSpot | null {
+  const lat = p.location?.latitude;
+  const lon = p.location?.longitude;
   if (typeof lat !== "number" || typeof lon !== "number") return null;
+
+  const name = p.displayName?.text ?? "Unknown burrito spot";
+  const streetNumber = componentText(p.addressComponents, "street_number");
+  const route = componentText(p.addressComponents, "route");
+  const address = [streetNumber, route].filter(Boolean).join(" ");
+  const city =
+    componentText(p.addressComponents, "locality") ||
+    componentText(p.addressComponents, "sublocality") ||
+    componentText(p.addressComponents, "postal_town");
+
   return {
-    id: String(b.id ?? `${b.name}-${lat}-${lon}`),
-    name: b.name ?? "Unknown burrito spot",
-    rating: typeof b.rating === "number" ? b.rating : 0,
-    reviewCount: typeof b.review_count === "number" ? b.review_count : 0,
-    price: b.price,
-    distanceMiles: metersToMiles(b.distance),
-    address: b.location?.address1 ?? "",
-    city: b.location?.city ?? "",
-    state: b.location?.state ?? "",
-    zip: b.location?.zip_code ?? "",
+    id: p.id ?? `${name}-${lat}-${lon}`,
+    name,
+    rating: typeof p.rating === "number" ? p.rating : 0,
+    reviewCount:
+      typeof p.userRatingCount === "number" ? p.userRatingCount : 0,
+    price: mapPriceLevel(p.priceLevel),
+    distanceMiles: center
+      ? haversineMiles(center.lat, center.lon, lat, lon)
+      : undefined,
+    address: address || p.formattedAddress?.split(",")[0] || "",
+    city,
+    state: componentText(
+      p.addressComponents,
+      "administrative_area_level_1",
+      true
+    ),
+    zip: componentText(p.addressComponents, "postal_code"),
     lat,
     lon,
-    url: b.url ?? "https://www.yelp.com",
-    imageUrl: b.image_url,
+    url:
+      p.googleMapsUri ??
+      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`,
   };
 }
 
@@ -72,7 +137,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const apiKey = process.env.YELP_API_KEY;
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
 
   if (!apiKey) {
     // Demo mode: no key configured. Center the mock spots on the requested
@@ -88,54 +153,71 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(body);
   }
 
-  const params = new URLSearchParams({
-    term: "burritos",
-    limit: "20",
-    sort_by: "best_match",
-  });
-  if (hasCoords) {
-    params.set("latitude", String(lat));
-    params.set("longitude", String(lon));
-  } else if (location) {
-    params.set("location", location);
-  }
+  const center = hasCoords ? { lat, lon } : null;
+  const body = {
+    textQuery: hasCoords ? "burritos" : `burritos in ${location}`,
+    pageSize: 20,
+    languageCode: "en",
+    ...(hasCoords
+      ? {
+          locationBias: {
+            circle: {
+              center: { latitude: lat, longitude: lon },
+              radius: 25000,
+            },
+          },
+        }
+      : {}),
+  };
 
-  let data: { businesses?: YelpBusiness[]; region?: { center?: { latitude?: number; longitude?: number } } };
+  let data: { places?: GooglePlace[] };
   try {
-    const res = await fetch(`${YELP_SEARCH_URL}?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    const res = await fetch(PLACES_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        "X-Goog-FieldMask": FIELD_MASK,
+      },
+      body: JSON.stringify(body),
       // Don't cache: results depend on the request.
       cache: "no-store",
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       return NextResponse.json(
-        { error: `Yelp API error (${res.status})`, detail: detail.slice(0, 200) },
+        {
+          error: `Google Places API error (${res.status})`,
+          detail: detail.slice(0, 200),
+        },
         { status: 502 }
       );
     }
     data = (await res.json()) as typeof data;
   } catch (err) {
     return NextResponse.json(
-      { error: "Could not reach the Yelp API", detail: String(err).slice(0, 200) },
+      {
+        error: "Could not reach the Google Places API",
+        detail: String(err).slice(0, 200),
+      },
       { status: 502 }
     );
   }
 
-  const spots = (data.businesses ?? [])
-    .map(normalizeBusiness)
+  const spots = (data.places ?? [])
+    .map((p) => normalizePlace(p, center))
     .filter((s): s is BurritoSpot => s !== null);
 
-  const regionCenter = data.region?.center;
-  const center =
-    regionCenter?.latitude != null && regionCenter?.longitude != null
-      ? { lat: regionCenter.latitude, lon: regionCenter.longitude }
-      : hasCoords
-        ? { lat, lon }
-        : spots.length > 0
-          ? { lat: spots[0].lat, lon: spots[0].lon }
-          : { lat: 39.7392, lon: -104.9903 };
+  const mapCenter =
+    center ??
+    (spots.length > 0
+      ? { lat: spots[0].lat, lon: spots[0].lon }
+      : { lat: 39.7392, lon: -104.9903 });
 
-  const body: BurritoSearchResponse = { spots, demo: false, center };
-  return NextResponse.json(body);
+  const responseBody: BurritoSearchResponse = {
+    spots,
+    demo: false,
+    center: mapCenter,
+  };
+  return NextResponse.json(responseBody);
 }

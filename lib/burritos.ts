@@ -21,7 +21,7 @@ export interface BurritoSearchResponse {
   center: { lat: number; lon: number };
 }
 
-/** Fun mock spots used when no Yelp API key is configured. */
+/** Fun mock spots used when no Google Places API key is configured. */
 export function mockSpots(centerLat: number, centerLon: number): BurritoSpot[] {
   const spots: Array<Omit<BurritoSpot, "lat" | "lon" | "distanceMiles"> & { dLat: number; dLon: number }> = [
     {
@@ -34,7 +34,7 @@ export function mockSpots(centerLat: number, centerLon: number): BurritoSpot[] {
       city: "Burritoville",
       state: "CA",
       zip: "94110",
-      url: "https://www.yelp.com",
+      url: "https://www.google.com/maps/search/?api=1&query=El+Camino+Real",
       dLat: 0.012,
       dLon: 0.008,
     },
@@ -48,7 +48,7 @@ export function mockSpots(centerLat: number, centerLon: number): BurritoSpot[] {
       city: "Burritoville",
       state: "CA",
       zip: "94110",
-      url: "https://www.yelp.com",
+      url: "https://www.google.com/maps/search/?api=1&query=The+Wrapped+Wonder",
       dLat: -0.009,
       dLon: 0.014,
     },
@@ -62,7 +62,7 @@ export function mockSpots(centerLat: number, centerLon: number): BurritoSpot[] {
       city: "Burritoville",
       state: "CA",
       zip: "94110",
-      url: "https://www.yelp.com",
+      url: "https://www.google.com/maps/search/?api=1&query=Casa+del+Burrito+Grande",
       dLat: 0.004,
       dLon: -0.011,
     },
@@ -76,7 +76,7 @@ export function mockSpots(centerLat: number, centerLon: number): BurritoSpot[] {
       city: "Burritoville",
       state: "CA",
       zip: "94110",
-      url: "https://www.yelp.com",
+      url: "https://www.google.com/maps/search/?api=1&query=Midnight+Munchies+Taqueria",
       dLat: -0.015,
       dLon: -0.006,
     },
@@ -97,7 +97,7 @@ export function mockSpots(centerLat: number, centerLon: number): BurritoSpot[] {
   });
 }
 
-function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
+export function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
   const R = 3958.8; // Earth radius in miles
   const dLat = toRad(lat2 - lat1);

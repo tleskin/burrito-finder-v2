@@ -213,7 +213,7 @@ export default function Home() {
 
           {demo && searched && (
             <p className="mx-auto mt-4 inline-block rounded-full bg-amber-100 px-4 py-1.5 text-sm font-medium text-amber-800">
-              Demo data — add a Yelp API key for live results.
+              Demo data — add a Google Places API key for live results.
             </p>
           )}
         </section>

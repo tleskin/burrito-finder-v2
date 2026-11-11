@@ -84,7 +84,7 @@ export default function BurritoCard({
         onClick={(e) => e.stopPropagation()}
         className="mt-2 inline-block text-sm font-medium text-amber-700 underline-offset-2 hover:underline"
       >
-        View on Yelp →
+        View on Google Maps →
       </a>
     </article>
   );

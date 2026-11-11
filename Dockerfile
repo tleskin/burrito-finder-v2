@@ -11,7 +11,7 @@ FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# No Yelp key at build time is fine — the API route reads it at runtime.
+# No Google Places key at build time is fine — the API route reads it at runtime.
 RUN npm run build
 
 # --- runner ---
