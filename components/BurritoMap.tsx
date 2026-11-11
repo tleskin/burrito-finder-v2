@@ -48,6 +48,11 @@ export default function BurritoMap({ spots, center, selectedId, onSelect }: Burr
       center={[center.lat, center.lon]}
       zoom={13}
       scrollWheelZoom
+      // Pinch zoom OFF: on a touchscreen laptop, Leaflet's pinch handler
+      // fires on one-finger touches, so touching the map zooms instead of
+      // panning. One-finger drag pans; +/- buttons and the scroll wheel
+      // still zoom.
+      touchZoom={false}
       className="h-full w-full"
       style={{ minHeight: 320 }}
     >
